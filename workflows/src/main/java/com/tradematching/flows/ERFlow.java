@@ -8,16 +8,19 @@ import com.tradematching.states.PlacementSummary;
 import net.corda.core.contracts.Command;
 import net.corda.core.contracts.StateAndRef;
 import net.corda.core.contracts.UniqueIdentifier;
+import net.corda.core.crypto.SecureHash;
 import net.corda.core.flows.*;
 import net.corda.core.identity.CordaX500Name;
 import net.corda.core.identity.Party;
 import net.corda.core.transactions.SignedTransaction;
 import net.corda.core.transactions.TransactionBuilder;
 import net.corda.core.flows.FlowLogic;
+import net.corda.core.utilities.ProgressTracker;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class ERFlow {
@@ -38,6 +41,12 @@ public class ERFlow {
             this.quantity = quantity;
             this.price = price;
         }
+
+        private final ProgressTracker.Step WAITING_FOR_FINALIZATION = new ProgressTracker.Step("Waiting for transaction finalization");
+
+        private final ProgressTracker progressTracker = new ProgressTracker(
+                WAITING_FOR_FINALIZATION
+        );
 
         @Override
         @Suspendable
@@ -105,7 +114,31 @@ public class ERFlow {
 
             final SignedTransaction fullySignedTx = subFlow(new CollectSignaturesFlow(partiallySignedTx, sessions));
 
-            return subFlow(new FinalityFlow(fullySignedTx, sessions));
+            // Finalize the transaction and wait for finality
+            SignedTransaction finalizedTx = subFlow(new FinalityFlow(fullySignedTx, sessions));
+
+            // Wait for the transaction to be finalized
+            waitForFinalization(finalizedTx.getId());
+
+            return finalizedTx;
+        }
+        private void waitForFinalization(SecureHash txId) throws FlowException {
+            boolean finalized = false;
+            while (!finalized) {
+                try {
+                    // Check if the transaction is finalized
+                    finalized = getServiceHub().getValidatedTransactions().getTransaction(txId) != null;
+                    if (!finalized) {
+                        // Wait for a while before checking again
+                        progressTracker.setCurrentStep(WAITING_FOR_FINALIZATION);
+                        TimeUnit.SECONDS.sleep(5);
+                    }
+                } catch (InterruptedException e) {
+                    throw new FlowException("Error while waiting for transaction finalization", e);
+                }
+            }
+            progressTracker.setCurrentStep(Arrays.stream(progressTracker.getSteps()).iterator().next());
+            getLogger().info("Transaction {} has been finalized.", txId);
         }
     }
 
