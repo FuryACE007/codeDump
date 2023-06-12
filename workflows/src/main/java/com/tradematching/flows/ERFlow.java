@@ -96,7 +96,9 @@ public class ERFlow {
                     new Command<>(new PlacementSummaryContract.Commands.GenerateSummary(),
                             Arrays.asList(broker.getOwningKey(), fidNode.getOwningKey()));
 
-            TransactionBuilder txBuilder = new TransactionBuilder(getServiceHub().getNetworkMapCache().getNotaryIdentities().get(0))
+            final Party notary = getServiceHub().getNetworkMapCache().getNotaryIdentities().get(0);
+
+            TransactionBuilder txBuilder = new TransactionBuilder(notary)
                     .addOutputState(updatePlacementSummary, PlacementSummaryContract.ID)
                     .addOutputState(erState, ERContract.ID)
                     .addCommand(erCommand)
@@ -111,6 +113,7 @@ public class ERFlow {
             final SignedTransaction partiallySignedTx = getServiceHub().signInitialTransaction(txBuilder);
 
             List<FlowSession> sessions = getServiceHub().getNetworkMapCache().getAllNodes().stream()
+                    .filter(node -> !node.getLegalIdentities().contains(notary) && !node.getLegalIdentities().contains(broker))
                     .map(node -> initiateFlow(node.getLegalIdentities().get(0)))
                     .collect(Collectors.toList());
 
